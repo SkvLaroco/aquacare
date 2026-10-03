@@ -1,0 +1,24 @@
+{
+  "name": "aquacare",
+  "version": "1.0.0",
+  "description": "AquaCare - Aquarium Care and Maintenance Tracker (CITE 006A Final Project)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["aquarium", "express", "mongodb", "crud"],
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.5.0",
+    "serverless-http": "^3.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
