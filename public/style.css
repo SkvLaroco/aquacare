@@ -73,6 +73,19 @@ h3 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 .stat-upcoming { border-left-color: #3a9bc9; }
 .stat-overdue { border-left-color: #d0402f; }
 
+.water {
+  margin-top: 1rem;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+.water-head { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+.water-head h3 { margin: 0; }
+.water-bar { height: 14px; background: var(--foam); border-radius: 7px; overflow: hidden; margin: 0.6rem 0 0.4rem; }
+.water-fill { height: 100%; width: 0; background: #3a9bc9; transition: width 0.4s; }
+.water-text { margin: 0; color: var(--muted); }
+
 .recent { margin-top: 1rem; }
 .recent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
 .recent-list li {

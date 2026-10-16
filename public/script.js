@@ -357,6 +357,29 @@ async function removeTask(task) {
   }
 }
 
+// ---------- Water level sensor ----------
+
+const WATER_URL = '/api/water-level/latest';
+const WATER_BADGE = { OK: 'completed', LOW: 'today', CRITICAL: 'overdue' };
+
+async function loadWater() {
+  const badge = $('waterBadge');
+  try {
+    const reading = await api(WATER_URL);
+    $('waterFill').style.width = reading.level + '%';
+    badge.textContent = reading.status;
+    badge.className = 'badge badge-' + WATER_BADGE[reading.status];
+    const when = new Date(reading.createdAt).toLocaleString('en-PH');
+    const tank = reading.aquarium ? reading.aquarium + ': ' : '';
+    $('waterText').textContent = tank + reading.level + '% (last reading ' + when + ')';
+  } catch (err) {
+    $('waterFill').style.width = '0';
+    badge.textContent = 'No data';
+    badge.className = 'badge';
+    $('waterText').textContent = 'Waiting for the first reading from the sensor.';
+  }
+}
+
 // ---------- Start ----------
 
 document.querySelectorAll('.filter').forEach((button) => {
@@ -372,3 +395,5 @@ $('cancelEditBtn').addEventListener('click', resetForm);
 
 resetForm();
 loadTasks();
+loadWater();
+setInterval(loadWater, 10000); // refresh the sensor card every 10 seconds
