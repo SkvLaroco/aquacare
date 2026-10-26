@@ -2,8 +2,11 @@
 // Relative URLs are used on purpose, so it works locally and after deployment.
 const API_URL = '/api/tasks';
 
+const AQUARIUMS_URL = '/api/aquariums';
+
 const state = {
   tasks: [],
+  aquariums: [],
   filter: 'all',
   editingId: null,
 };
@@ -172,9 +175,86 @@ function renderDashboard() {
   });
 }
 
+// Every aquarium name we know about: saved aquariums plus names already used by tasks.
+function allAquariumNames() {
+  const seen = {};
+  const names = [];
+  state.aquariums.map((a) => a.name).concat(state.tasks.map((t) => t.aquarium)).forEach((name) => {
+    const key = String(name).toLowerCase();
+    if (name && !seen[key]) {
+      seen[key] = true;
+      names.push(name);
+    }
+  });
+  return names.sort((a, b) => a.localeCompare(b));
+}
+
+// Rebuild the aquarium drop-down, keeping the current (or a requested) selection.
+function renderAquariumOptions(selectName) {
+  const select = $('aquarium');
+  const wanted = selectName !== undefined ? selectName : select.value;
+  const names = allAquariumNames();
+  select.innerHTML = '';
+  if (names.length === 0) {
+    select.appendChild(el('option', { text: 'No aquariums yet: press + to add one', attrs: { value: '' } }));
+    return;
+  }
+  names.forEach((name) => select.appendChild(el('option', { text: name, attrs: { value: name } })));
+  if (names.includes(wanted)) select.value = wanted;
+}
+
+async function loadAquariums() {
+  try {
+    state.aquariums = await api(AQUARIUMS_URL);
+  } catch (err) {
+    state.aquariums = [];
+  }
+  renderAquariumOptions();
+  renderAquariums();
+}
+
+function openNewAquarium() {
+  $('newAquariumRow').hidden = false;
+  $('newAquarium').value = '';
+  $('newAquarium').focus();
+}
+
+function closeNewAquarium() {
+  $('newAquariumRow').hidden = true;
+  $('newAquarium').value = '';
+}
+
+async function saveNewAquarium() {
+  const name = $('newAquarium').value.trim();
+  if (!name) {
+    showFormErrors(['Type a name for the new aquarium']);
+    return;
+  }
+  try {
+    const created = await api(AQUARIUMS_URL, { method: 'POST', body: JSON.stringify({ name }) });
+    showFormErrors([]);
+    state.aquariums.push(created);
+    renderAquariumOptions(created.name);
+    renderAquariums();
+    closeNewAquarium();
+    showMessage('Aquarium "' + created.name + '" added.', 'success');
+  } catch (err) {
+    if (/already exists/i.test(err.message)) {
+      // Select the existing one instead of showing an error.
+      const match = allAquariumNames().find((n) => n.toLowerCase() === name.toLowerCase());
+      if (match) renderAquariumOptions(match);
+      closeNewAquarium();
+      showMessage('That aquarium already exists. It is selected.', 'success');
+    } else {
+      showFormErrors(err.details.length ? err.details : [err.message]);
+    }
+  }
+}
+
 // "By aquarium" summary: task counts and a completion bar for each tank.
 function renderAquariums() {
   const tanks = {};
+  allAquariumNames().forEach((name) => { tanks[name] = { total: 0, completed: 0, overdue: 0, active: 0 }; });
   state.tasks.forEach((t) => {
     const name = t.aquarium;
     if (!tanks[name]) tanks[name] = { total: 0, completed: 0, overdue: 0, active: 0 };
@@ -195,7 +275,7 @@ function renderAquariums() {
 
   names.forEach((name) => {
     const t = tanks[name];
-    const percent = Math.round((t.completed / t.total) * 100);
+    const percent = t.total === 0 ? 0 : Math.round((t.completed / t.total) * 100);
     const fill = el('div', { className: 'tank-fill' });
     fill.style.width = percent + '%';
     const stats = el('p', { className: 'tank-stats' }, [
@@ -294,6 +374,7 @@ function renderTasks() {
 
 function render() {
   renderDashboard();
+  renderAquariumOptions();
   renderAquariums();
   renderTasks();
 }
@@ -302,11 +383,14 @@ function render() {
 
 function resetForm() {
   state.editingId = null;
+  const keepAquarium = $('aquarium').value; // keep the same tank selected between tasks
   $('taskForm').reset();
+  renderAquariumOptions(keepAquarium);
   $('dueDate').value = todayString();
   $('formHeading').textContent = 'Add a task';
   $('submitBtn').textContent = 'Add task';
   $('cancelEditBtn').hidden = true;
+  closeNewAquarium();
   showFormErrors([]);
 }
 
@@ -324,7 +408,7 @@ function readForm() {
 function checkForm(data) {
   const problems = [];
   if (!data.title) problems.push('Title is required');
-  if (!data.aquarium) problems.push('Aquarium name is required');
+  if (!data.aquarium) problems.push('Choose an aquarium (use + to add one)');
   if (!data.dueDate) problems.push('Due date is required');
   return problems;
 }
@@ -360,7 +444,7 @@ async function startEdit(id) {
     const task = await api(API_URL + '/' + id); // GET /api/tasks/:id
     state.editingId = task._id;
     $('title').value = task.title;
-    $('aquarium').value = task.aquarium;
+    renderAquariumOptions(task.aquarium);
     $('type').value = task.type;
     $('frequency').value = task.frequency;
     $('dueDate').value = dateOnly(task.dueDate);
@@ -422,6 +506,16 @@ document.querySelectorAll('.filter').forEach((button) => {
 
 $('taskForm').addEventListener('submit', handleSubmit);
 $('cancelEditBtn').addEventListener('click', resetForm);
+$('addAquariumBtn').addEventListener('click', openNewAquarium);
+$('saveAquariumBtn').addEventListener('click', saveNewAquarium);
+$('cancelAquariumBtn').addEventListener('click', closeNewAquarium);
+$('newAquarium').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    saveNewAquarium();
+  }
+});
 
 resetForm();
+loadAquariums();
 loadTasks();

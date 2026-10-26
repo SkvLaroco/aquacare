@@ -83,6 +83,12 @@ h3 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 .tank-stats { margin: 0; color: var(--muted); font-size: 0.92rem; }
 .tank-stats .overdue { color: var(--overdue-fg); font-weight: 700; }
 
+.select-row { display: flex; gap: 0.5rem; }
+.select-row select { flex: 1; min-width: 0; }
+.btn-icon { width: 2.6rem; font-size: 1.3rem; line-height: 1; padding: 0; font-weight: 700; }
+.new-aquarium { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+.new-aquarium input { flex: 1 1 100%; }
+
 .recent { margin-top: 1rem; }
 .recent-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
 .recent-list li {

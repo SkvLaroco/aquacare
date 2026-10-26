@@ -62,8 +62,16 @@
           <label for="title">Task title</label>
           <input type="text" id="title" maxlength="100" placeholder="e.g. Weekly water change" required>
 
-          <label for="aquarium">Aquarium name</label>
-          <input type="text" id="aquarium" maxlength="60" placeholder="e.g. 5G Betta Tank" required>
+          <label for="aquarium">Aquarium</label>
+          <div class="select-row">
+            <select id="aquarium" required></select>
+            <button type="button" class="btn btn-icon" id="addAquariumBtn" aria-label="Add a new aquarium" title="Add a new aquarium">+</button>
+          </div>
+          <div id="newAquariumRow" class="new-aquarium" hidden>
+            <input type="text" id="newAquarium" maxlength="60" placeholder="New aquarium name, e.g. 5G Betta Tank" aria-label="New aquarium name">
+            <button type="button" class="btn btn-primary btn-small" id="saveAquariumBtn">Add</button>
+            <button type="button" class="btn btn-quiet btn-small" id="cancelAquariumBtn">Cancel</button>
+          </div>
 
           <div class="row">
             <div>
