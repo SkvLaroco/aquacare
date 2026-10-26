@@ -172,6 +172,52 @@ function renderDashboard() {
   });
 }
 
+// "By aquarium" summary: task counts and a completion bar for each tank.
+function renderAquariums() {
+  const tanks = {};
+  state.tasks.forEach((t) => {
+    const name = t.aquarium;
+    if (!tanks[name]) tanks[name] = { total: 0, completed: 0, overdue: 0, active: 0 };
+    const status = getStatus(t);
+    tanks[name].total += 1;
+    if (status === 'completed') tanks[name].completed += 1;
+    else tanks[name].active += 1;
+    if (status === 'overdue') tanks[name].overdue += 1;
+  });
+
+  const list = $('aquariumList');
+  list.innerHTML = '';
+  const names = Object.keys(tanks).sort((a, b) => a.localeCompare(b));
+  if (names.length === 0) {
+    list.appendChild(el('li', { text: 'Add a task to see your aquariums here.' }));
+    return;
+  }
+
+  names.forEach((name) => {
+    const t = tanks[name];
+    const percent = Math.round((t.completed / t.total) * 100);
+    const fill = el('div', { className: 'tank-fill' });
+    fill.style.width = percent + '%';
+    const stats = el('p', { className: 'tank-stats' }, [
+      el('span', { text: t.active + ' active, ' + t.completed + ' done' }),
+    ]);
+    if (t.overdue > 0) {
+      stats.appendChild(document.createTextNode(', '));
+      stats.appendChild(el('span', { className: 'overdue', text: t.overdue + ' overdue' }));
+    }
+    list.appendChild(
+      el('li', {}, [
+        el('div', { className: 'tank-head' }, [
+          el('span', { className: 'tank-name', text: name }),
+          el('span', { text: percent + '% done' }),
+        ]),
+        el('div', { className: 'tank-bar', attrs: { 'aria-hidden': 'true' } }, [fill]),
+        stats,
+      ])
+    );
+  });
+}
+
 function buildTaskItem(task) {
   const status = getStatus(task);
 
@@ -248,6 +294,7 @@ function renderTasks() {
 
 function render() {
   renderDashboard();
+  renderAquariums();
   renderTasks();
 }
 
@@ -333,12 +380,18 @@ async function startEdit(id) {
 
 async function toggleComplete(task) {
   try {
-    await api(API_URL + '/' + task._id, {
+    const result = await api(API_URL + '/' + task._id, {
       method: 'PUT',
-      body: JSON.stringify({ completed: !task.completed }),
+      body: JSON.stringify({ completed: !task.completed, today: todayString() }),
     });
     await loadTasks();
-    showMessage(task.completed ? 'Task marked as not done.' : 'Task marked as done.', 'success');
+    if (task.completed) {
+      showMessage('Task marked as not done.', 'success');
+    } else if (result && result.nextTask) {
+      showMessage('Task done. Next one scheduled for ' + formatDate(dateOnly(result.nextTask.dueDate)) + '.', 'success');
+    } else {
+      showMessage('Task marked as done.', 'success');
+    }
   } catch (err) {
     showMessage('Could not update the task: ' + err.message, 'error');
   }
