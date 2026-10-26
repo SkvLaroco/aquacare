@@ -48,6 +48,12 @@ const taskSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // true once the next occurrence of a recurring task has been created,
+    // so marking the same task done twice cannot create duplicates
+    nextCreated: {
+      type: Boolean,
+      default: false,
+    },
     notes: {
       type: String,
       trim: true,
