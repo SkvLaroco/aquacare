@@ -5,6 +5,7 @@
 const path = require('path');
 const express = require('express');
 const taskRoutes = require('./routes/taskRoutes');
+const aquariumRoutes = require('./routes/aquariumRoutes');
 const { connectDB } = require('./db');
 
 const app = express();
@@ -32,6 +33,7 @@ app.get(API_BASES.map((base) => base + '/health'), withDb, (req, res) => {
 });
 
 app.use(API_BASES.map((base) => base + '/tasks'), withDb, taskRoutes);
+app.use(API_BASES.map((base) => base + '/aquariums'), withDb, aquariumRoutes);
 
 // Unknown /api routes -> JSON 404
 app.use('/api', (req, res) => {
