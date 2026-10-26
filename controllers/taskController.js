@@ -25,6 +25,37 @@ function dueDateProblem(data) {
   return null;
 }
 
+// ---------- Recurring tasks ----------
+// Daily, Weekly and Monthly tasks create their next occurrence when completed.
+const RECURRING = ['Daily', 'Weekly', 'Monthly'];
+
+// Adds one interval to a date (all maths in UTC, because dueDate is stored as midnight UTC).
+function addInterval(date, frequency) {
+  const d = new Date(date);
+  if (frequency === 'Daily') {
+    d.setUTCDate(d.getUTCDate() + 1);
+  } else if (frequency === 'Weekly') {
+    d.setUTCDate(d.getUTCDate() + 7);
+  } else if (frequency === 'Monthly') {
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + 1);
+    const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, lastDay)); // e.g. Jan 31 -> Feb 28
+  }
+  return d;
+}
+
+// The next due date: one interval after the old due date, moved forward
+// until it is later than today (so an overdue task does not create overdue copies).
+function nextDueDate(dueDate, frequency, todayStr) {
+  let next = addInterval(dueDate, frequency);
+  while (next.toISOString().slice(0, 10) <= todayStr) {
+    next = addInterval(next, frequency);
+  }
+  return next;
+}
+
 function handleError(res, err) {
   if (err.name === 'ValidationError') {
     const errors = Object.values(err.errors).map((e) => e.message);
@@ -100,12 +131,34 @@ exports.updateTask = async (req, res) => {
       data.completedAt = data.completed ? new Date() : null;
     }
 
+    const existing = await Task.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: 'Task not found' });
+
+    // Completing a Daily / Weekly / Monthly task creates the next occurrence.
+    let nextTask = null;
+    const frequency = data.frequency !== undefined ? data.frequency : existing.frequency;
+    if (data.completed === true && !existing.completed && !existing.nextCreated && RECURRING.includes(frequency)) {
+      const body = req.body || {};
+      // The browser sends its own "today" so the result matches the user's time zone.
+      const todayStr = /^\d{4}-\d{2}-\d{2}$/.test(body.today) ? body.today : new Date().toISOString().slice(0, 10);
+      const dueDate = data.dueDate !== undefined ? data.dueDate : existing.dueDate;
+      nextTask = await Task.create({
+        title: data.title !== undefined ? data.title : existing.title,
+        aquarium: data.aquarium !== undefined ? data.aquarium : existing.aquarium,
+        type: data.type !== undefined ? data.type : existing.type,
+        frequency,
+        notes: data.notes !== undefined ? data.notes : existing.notes,
+        dueDate: nextDueDate(dueDate, frequency, todayStr),
+      });
+      data.nextCreated = true;
+    }
+
     const task = await Task.findByIdAndUpdate(req.params.id, data, {
       new: true,
       runValidators: true,
     });
     if (!task) return res.status(404).json({ message: 'Task not found' });
-    res.status(200).json(task);
+    res.status(200).json({ ...task.toObject(), nextTask });
   } catch (err) {
     handleError(res, err);
   }
