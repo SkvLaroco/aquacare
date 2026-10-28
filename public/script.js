@@ -1,521 +1,388 @@
-// AquaCare frontend: talks to the Express API using fetch().
-// Relative URLs are used on purpose, so it works locally and after deployment.
-const API_URL = '/api/tasks';
+// AquaCare frontend. Talks to the Express API with fetch() using relative URLs.
+const API = '/api/tasks';
+const AQ_API = '/api/aquariums';
+const NEW_AQUARIUM = '__new__';
 
-const AQUARIUMS_URL = '/api/aquariums';
-
-const state = {
-  tasks: [],
-  aquariums: [],
-  filter: 'all',
-  editingId: null,
-};
-
+const state = { tasks: [], aquariums: [], filter: 'active', aquarium: 'all', search: '', editingId: null, deleting: null, lastAquarium: '' };
 const $ = (id) => document.getElementById(id);
 
-// ---------- Small helpers ----------
-
-// Create an element safely (text is inserted with textContent, never as HTML).
-function el(tag, options = {}, children = []) {
-  const node = document.createElement(tag);
-  if (options.className) node.className = options.className;
-  if (options.text !== undefined) node.textContent = options.text;
-  if (options.type) node.type = options.type;
-  if (options.onClick) node.addEventListener('click', options.onClick);
-  if (options.attrs) {
-    Object.entries(options.attrs).forEach(([key, value]) => node.setAttribute(key, value));
-  }
-  children.forEach((child) => node.appendChild(child));
-  return node;
+function el(tag, o = {}, kids = []) {
+  const n = document.createElement(tag);
+  if (o.className) n.className = o.className;
+  if (o.text !== undefined) n.textContent = o.text;
+  if (o.type) n.type = o.type;
+  if (o.onClick) n.addEventListener('click', o.onClick);
+  if (o.attrs) Object.entries(o.attrs).forEach(([k, v]) => n.setAttribute(k, v));
+  kids.forEach((k) => n.appendChild(k));
+  return n;
 }
 
-// Today's date as YYYY-MM-DD in the user's local time zone.
+// ---------- Dates (status is computed here, not stored) ----------
 function todayString() {
   const d = new Date();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return d.getFullYear() + '-' + month + '-' + day;
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
-
-// The API stores the due date as midnight UTC of the chosen day,
-// so the first 10 characters are always the date the user picked.
-function dateOnly(value) {
-  return String(value).slice(0, 10);
+const dateOnly = (v) => String(v).slice(0, 10);
+const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+function formatDate(s) {
+  const d = new Date(s + 'T00:00:00');
+  const opts = { month: 'short', day: 'numeric' };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString('en-PH', opts);
 }
-
-function daysBetween(fromDate, toDate) {
-  const from = Date.parse(fromDate + 'T00:00:00Z');
-  const to = Date.parse(toDate + 'T00:00:00Z');
-  return Math.round((to - from) / 86400000);
+function getStatus(t) {
+  if (t.completed) return 'completed';
+  const due = dateOnly(t.dueDate), today = todayString();
+  return due < today ? 'overdue' : due === today ? 'today' : 'upcoming';
 }
-
-function formatDate(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function pluralDays(n) {
-  return n + (n === 1 ? ' day' : ' days');
-}
-
-// Status is worked out here from dueDate + completed (it is not stored in MongoDB).
-function getStatus(task) {
-  if (task.completed) return 'completed';
-  const due = dateOnly(task.dueDate);
-  const today = todayString();
-  if (due < today) return 'overdue';
-  if (due === today) return 'today';
-  return 'upcoming';
-}
-
-const STATUS_LABELS = {
-  overdue: 'Overdue',
-  today: 'Due today',
-  upcoming: 'Upcoming',
-  completed: 'Completed',
-};
-
-function dueText(task) {
-  const due = dateOnly(task.dueDate);
-  const diff = daysBetween(todayString(), due);
-  if (task.completed) {
-    return task.completedAt ? 'Completed on ' + formatDate(dateOnly(task.completedAt)) : 'Completed';
-  }
-  if (diff < 0) return 'Due ' + formatDate(due) + ' (' + pluralDays(-diff) + ' overdue)';
-  if (diff === 0) return 'Due today (' + formatDate(due) + ')';
-  return 'Due ' + formatDate(due) + ' (in ' + pluralDays(diff) + ')';
+function relative(t) {
+  if (t.completed) return t.completedAt ? 'done ' + formatDate(dateOnly(t.completedAt)) : 'done';
+  const n = daysBetween(todayString(), dateOnly(t.dueDate));
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n === -1) return 'yesterday';
+  return n > 0 ? 'in ' + n + ' days' : -n + ' days ago';
 }
 
 // ---------- Messages ----------
-
-let messageTimer = null;
-
+let toastTimer = null;
 function showMessage(text, kind) {
-  const box = $('message');
-  box.textContent = text;
-  box.className = kind === 'error' ? 'is-error' : 'is-success';
-  box.hidden = false;
-  clearTimeout(messageTimer);
-  if (kind !== 'error') {
-    messageTimer = setTimeout(() => { box.hidden = true; }, 3500);
-  }
+  const t = $('toast');
+  t.textContent = text;
+  t.className = kind === 'error' ? 'error' : '';
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, kind === 'error' ? 6000 : 3500);
 }
-
-function showFormErrors(messages) {
-  const list = $('formErrors');
-  list.innerHTML = '';
-  messages.forEach((m) => list.appendChild(el('li', { text: m })));
-  list.hidden = messages.length === 0;
+function showFormErrors(list) {
+  const ul = $('formErrors');
+  ul.innerHTML = '';
+  list.forEach((m) => ul.appendChild(el('li', { text: m })));
+  ul.hidden = list.length === 0;
 }
 
 // ---------- API ----------
-
 async function api(url, options = {}) {
-  const response = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
   let data = null;
-  try {
-    data = await response.json();
-  } catch (e) {
-    data = null;
-  }
-
-  if (!response.ok) {
-    const error = new Error((data && data.message) || 'Request failed (' + response.status + ')');
-    error.details = (data && data.errors) || [];
-    throw error;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (!res.ok) {
+    const err = new Error((data && data.message) || 'Request failed (' + res.status + ')');
+    err.details = (data && data.errors) || [];
+    throw err;
   }
   return data;
 }
-
 async function loadTasks() {
   try {
-    state.tasks = await api(API_URL);
+    state.tasks = await api(API);
     render();
   } catch (err) {
     showMessage('Could not load tasks: ' + err.message, 'error');
-    $('emptyState').textContent = 'Tasks could not be loaded. Check that the server and database are running, then refresh.';
-    $('emptyState').hidden = false;
   }
 }
-
-// ---------- Rendering ----------
-
-function renderDashboard() {
-  const counts = { overdue: 0, today: 0, upcoming: 0, completed: 0 };
-  state.tasks.forEach((t) => { counts[getStatus(t)] += 1; });
-
-  $('statActive').textContent = counts.overdue + counts.today + counts.upcoming;
-  $('statToday').textContent = counts.today;
-  $('statUpcoming').textContent = counts.upcoming;
-  $('statOverdue').textContent = counts.overdue;
-
-  const recent = state.tasks
-    .filter((t) => t.completed)
-    .sort((a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt))
-    .slice(0, 5);
-
-  const list = $('recentList');
-  list.innerHTML = '';
-  if (recent.length === 0) {
-    list.appendChild(el('li', { className: 'recent-empty', text: 'Nothing completed yet.' }));
-    return;
-  }
-  recent.forEach((t) => {
-    const when = t.completedAt ? formatDate(dateOnly(t.completedAt)) : '';
-    list.appendChild(
-      el('li', {}, [
-        el('span', { text: t.title + ' (' + t.aquarium + ')' }),
-        el('span', { className: 'when', text: when }),
-      ])
-    );
-  });
+async function loadAquariums() {
+  try { state.aquariums = await api(AQ_API); } catch (e) { state.aquariums = []; }
+  render();
 }
 
-// Every aquarium name we know about: saved aquariums plus names already used by tasks.
-function allAquariumNames() {
-  const seen = {};
-  const names = [];
-  state.aquariums.map((a) => a.name).concat(state.tasks.map((t) => t.aquarium)).forEach((name) => {
-    const key = String(name).toLowerCase();
-    if (name && !seen[key]) {
-      seen[key] = true;
-      names.push(name);
-    }
+// ---------- Aquarium names ----------
+function aquariumNames() {
+  const seen = {}, names = [];
+  state.aquariums.map((a) => a.name).concat(state.tasks.map((t) => t.aquarium)).forEach((n) => {
+    if (n && !seen[n.toLowerCase()]) { seen[n.toLowerCase()] = true; names.push(n); }
   });
   return names.sort((a, b) => a.localeCompare(b));
 }
 
-// Rebuild the aquarium drop-down, keeping the current (or a requested) selection.
-function renderAquariumOptions(selectName) {
-  const select = $('aquarium');
-  const wanted = selectName !== undefined ? selectName : select.value;
-  const names = allAquariumNames();
-  select.innerHTML = '';
-  if (names.length === 0) {
-    select.appendChild(el('option', { text: 'No aquariums yet: press + to add one', attrs: { value: '' } }));
+const canon = (name) => aquariumNames().find((n) => n.toLowerCase() === String(name).toLowerCase()) || name;
+
+// ---------- Rendering ----------
+function visibleTasks() {
+  const q = state.search.trim().toLowerCase();
+  return state.tasks.filter((t) => {
+    const s = getStatus(t);
+    if (state.filter === 'active' ? s === 'completed' : s !== state.filter) return false;
+    if (state.aquarium !== 'all' && canon(t.aquarium) !== state.aquarium) return false;
+    return !q || (t.title + ' ' + t.aquarium + ' ' + t.type + ' ' + (t.notes || '')).toLowerCase().includes(q);
+  });
+}
+
+function renderStrip() {
+  const c = { overdue: 0, today: 0, upcoming: 0, completed: 0 };
+  state.tasks.forEach((t) => { c[getStatus(t)] += 1; });
+  $('nActive').textContent = c.overdue + c.today + c.upcoming;
+  $('nOverdue').textContent = c.overdue;
+  $('nToday').textContent = c.today;
+  $('nUpcoming').textContent = c.upcoming;
+  $('nCompleted').textContent = c.completed;
+  document.querySelectorAll('.tab').forEach((b) => {
+    b.classList.toggle('is-active', b.dataset.filter === state.filter);
+    b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter));
+    b.classList.toggle('alert', b.dataset.filter === 'overdue' && c.overdue > 0);
+  });
+}
+
+function renderTools() {
+  const sel = $('filterAquarium');
+  sel.innerHTML = '';
+  sel.appendChild(el('option', { text: 'All aquariums', attrs: { value: 'all' } }));
+  aquariumNames().forEach((n) => sel.appendChild(el('option', { text: n, attrs: { value: n } })));
+  sel.value = aquariumNames().includes(state.aquarium) ? state.aquarium : 'all';
+  state.aquarium = sel.value;
+}
+
+function buildRow(t) {
+  const s = getStatus(t);
+  const main = [
+    el('div', { className: 'title', text: t.title }),
+    el('div', { className: 'meta' }, [t.aquarium, t.type, t.frequency].map((x) => el('span', { text: x }))),
+  ];
+  if (t.notes) main.push(el('p', { className: 'notes', text: t.notes }));
+
+  const actions = state.deleting === t._id
+    ? [
+        el('span', { className: 'confirm', text: 'Delete this task?' }),
+        el('button', { type: 'button', className: 'btn btn-danger', text: 'Delete', onClick: () => removeTask(t) }),
+        el('button', { type: 'button', className: 'btn btn-text', text: 'Keep', onClick: () => { state.deleting = null; renderList(); } }),
+      ]
+    : [
+        el('button', { type: 'button', className: 'btn btn-text', text: 'Edit', attrs: { 'aria-label': 'Edit ' + t.title }, onClick: () => startEdit(t._id) }),
+        el('button', { type: 'button', className: 'btn btn-text', text: 'Delete', attrs: { 'aria-label': 'Delete ' + t.title }, onClick: () => { state.deleting = t._id; renderList(); } }),
+      ];
+
+  return el('li', { className: 'task ' + s + (t.completed ? ' done' : '') }, [
+    el('button', { type: 'button', className: 'check', attrs: { 'aria-label': (t.completed ? 'Mark not done: ' : 'Mark done: ') + t.title }, onClick: () => toggleComplete(t) }),
+    el('div', {}, main),
+    el('div', { className: 'when' }, [
+      el('span', { className: 'date', text: formatDate(dateOnly(t.dueDate)) }),
+      el('span', { className: 'rel', text: relative(t) }),
+    ]),
+    el('div', { className: 'actions' }, actions),
+  ]);
+}
+
+function renderList() {
+  const area = $('taskArea');
+  area.innerHTML = '';
+  let tasks = visibleTasks();
+
+  if (tasks.length === 0) {
+    const none = state.tasks.length === 0;
+    const box = el('div', { className: 'empty' }, [
+      el('p', { text: none ? 'No tasks yet. Start with the next thing your tank needs.' : 'Nothing matches these filters.' }),
+    ]);
+    if (none) box.appendChild(el('button', { type: 'button', className: 'btn btn-primary', text: 'Add the first task', onClick: () => openForm() }));
+    area.appendChild(box);
     return;
   }
-  names.forEach((name) => select.appendChild(el('option', { text: name, attrs: { value: name } })));
-  if (names.includes(wanted)) select.value = wanted;
-}
 
-async function loadAquariums() {
-  try {
-    state.aquariums = await api(AQUARIUMS_URL);
-  } catch (err) {
-    state.aquariums = [];
+  const byDue = (a, b) => dateOnly(a.dueDate).localeCompare(dateOnly(b.dueDate));
+  if (state.filter === 'completed') {
+    tasks = tasks.sort((a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt));
+    const ul = el('ul', { className: 'plain' });
+    tasks.forEach((t) => ul.appendChild(buildRow(t)));
+    area.appendChild(ul);
+    return;
   }
-  renderAquariumOptions();
-  renderAquariums();
+  const groups = state.filter === 'active' ? ['overdue', 'today', 'upcoming'] : [state.filter];
+  const heads = { overdue: 'Overdue', today: 'Due today', upcoming: 'Upcoming' };
+  groups.forEach((g) => {
+    const items = tasks.filter((t) => getStatus(t) === g).sort(byDue);
+    if (items.length === 0) return;
+    if (state.filter === 'active') {
+      area.appendChild(el('h3', { className: 'group-head ' + g }, [document.createTextNode(heads[g]), el('span', { className: 'count', text: String(items.length) })]));
+    }
+    const ul = el('ul', { className: 'plain' });
+    items.forEach((t) => ul.appendChild(buildRow(t)));
+    area.appendChild(ul);
+  });
 }
 
-function openNewAquarium() {
-  $('newAquariumRow').hidden = false;
-  $('newAquarium').value = '';
-  $('newAquarium').focus();
+function renderSide() {
+  const tanks = {};
+  aquariumNames().forEach((n) => { tanks[n] = { total: 0, done: 0, active: 0, late: 0 }; });
+  state.tasks.forEach((t) => {
+    const x = tanks[canon(t.aquarium)], s = getStatus(t);
+    x.total += 1;
+    if (s === 'completed') x.done += 1; else x.active += 1;
+    if (s === 'overdue') x.late += 1;
+  });
+  const list = $('aquariumList');
+  list.innerHTML = '';
+  const names = Object.keys(tanks);
+  if (names.length === 0) list.appendChild(el('li', { className: 'side-empty', text: 'None yet. Add one from the New task form.' }));
+  names.forEach((n) => {
+    const x = tanks[n], pct = x.total ? Math.round((x.done / x.total) * 100) : 0;
+    const fill = el('div', { className: 'tank-fill' });
+    fill.style.width = pct + '%';
+    const note = el('div', { className: 'tank-note' }, [document.createTextNode(x.total ? x.active + ' active, ' + x.done + ' done' : 'No tasks yet')]);
+    if (x.late) { note.appendChild(document.createTextNode(', ')); note.appendChild(el('span', { className: 'late', text: x.late + ' overdue' })); }
+    list.appendChild(el('li', {}, [
+      el('button', { type: 'button', className: 'tank' + (state.aquarium === n ? ' is-active' : ''), attrs: { 'aria-pressed': String(state.aquarium === n) }, onClick: () => { state.aquarium = state.aquarium === n ? 'all' : n; render(); } }, [
+        el('div', { className: 'tank-line' }, [el('span', { className: 'tank-name', text: n }), el('span', { className: 'tank-pct', text: pct + '%' })]),
+        el('div', { className: 'tank-bar', attrs: { 'aria-hidden': 'true' } }, [fill]),
+        note,
+      ]),
+    ]));
+  });
+
+  const recent = state.tasks.filter((t) => t.completed)
+    .sort((a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt)).slice(0, 5);
+  const rl = $('recentList');
+  rl.innerHTML = '';
+  rl.className = 'plain recent';
+  if (recent.length === 0) rl.appendChild(el('li', { className: 'side-empty', text: 'Nothing completed yet.' }));
+  recent.forEach((t) => rl.appendChild(el('li', {}, [
+    el('span', { text: t.title + ' (' + t.aquarium + ')' }),
+    el('span', { className: 'when-done', text: t.completedAt ? formatDate(dateOnly(t.completedAt)) : '' }),
+  ])));
 }
 
-function closeNewAquarium() {
-  $('newAquariumRow').hidden = true;
-  $('newAquarium').value = '';
+function render() {
+  renderStrip();
+  renderTools();
+  renderList();
+  renderSide();
 }
+
+// ---------- Task form (a dialog) ----------
+function renderAquariumOptions(selected) {
+  const sel = $('aquarium');
+  sel.innerHTML = '';
+  aquariumNames().forEach((n) => sel.appendChild(el('option', { text: n, attrs: { value: n } })));
+  sel.appendChild(el('option', { text: '+ New aquarium...', attrs: { value: NEW_AQUARIUM } }));
+  const names = aquariumNames();
+  sel.value = names.includes(selected) ? selected : (names[0] || NEW_AQUARIUM);
+  state.lastAquarium = sel.value === NEW_AQUARIUM ? '' : sel.value;
+  syncNewAquariumRow();
+}
+function syncNewAquariumRow() {
+  const adding = $('aquarium').value === NEW_AQUARIUM;
+  $('newAquariumRow').hidden = !adding;
+  if (adding) $('newAquarium').focus();
+}
+function syncRepeatHint() {
+  $('repeatHint').hidden = !['Daily', 'Weekly', 'Monthly'].includes($('frequency').value);
+}
+
+function openForm(task) {
+  state.editingId = task ? task._id : null;
+  $('taskForm').reset();
+  showFormErrors([]);
+  $('newAquarium').value = '';
+  $('dialogTitle').textContent = task ? 'Edit task' : 'New task';
+  $('submitBtn').textContent = task ? 'Save changes' : 'Add task';
+  $('title').value = task ? task.title : '';
+  $('type').value = task ? task.type : 'Feeding';
+  $('frequency').value = task ? task.frequency : 'Once';
+  $('dueDate').value = task ? dateOnly(task.dueDate) : todayString();
+  $('notes').value = task ? task.notes || '' : '';
+  renderAquariumOptions(task ? task.aquarium : state.aquarium !== 'all' ? state.aquarium : state.lastAquarium);
+  syncRepeatHint();
+  $('taskDialog').showModal();
+  if ($('aquarium').value === NEW_AQUARIUM) $('newAquarium').focus(); else $('title').focus();
+}
+function closeForm() { $('taskDialog').close(); }
 
 async function saveNewAquarium() {
   const name = $('newAquarium').value.trim();
-  if (!name) {
-    showFormErrors(['Type a name for the new aquarium']);
+  if (!name) { showFormErrors(['Type a name for the new aquarium']); return; }
+  const existing = aquariumNames().find((n) => n.toLowerCase() === name.toLowerCase());
+  if (existing) { // already known (saved, or used by a task): just select it
+    showFormErrors([]);
+    renderAquariumOptions(existing);
     return;
   }
   try {
-    const created = await api(AQUARIUMS_URL, { method: 'POST', body: JSON.stringify({ name }) });
-    showFormErrors([]);
+    const created = await api(AQ_API, { method: 'POST', body: JSON.stringify({ name }) });
     state.aquariums.push(created);
+    showFormErrors([]);
     renderAquariumOptions(created.name);
-    renderAquariums();
-    closeNewAquarium();
-    showMessage('Aquarium "' + created.name + '" added.', 'success');
+    render();
   } catch (err) {
     if (/already exists/i.test(err.message)) {
-      // Select the existing one instead of showing an error.
-      const match = allAquariumNames().find((n) => n.toLowerCase() === name.toLowerCase());
-      if (match) renderAquariumOptions(match);
-      closeNewAquarium();
-      showMessage('That aquarium already exists. It is selected.', 'success');
+      const match = aquariumNames().find((n) => n.toLowerCase() === name.toLowerCase());
+      renderAquariumOptions(match || '');
+      showFormErrors([]);
     } else {
       showFormErrors(err.details.length ? err.details : [err.message]);
     }
   }
 }
-
-// "By aquarium" summary: task counts and a completion bar for each tank.
-function renderAquariums() {
-  const tanks = {};
-  allAquariumNames().forEach((name) => { tanks[name] = { total: 0, completed: 0, overdue: 0, active: 0 }; });
-  state.tasks.forEach((t) => {
-    const name = t.aquarium;
-    if (!tanks[name]) tanks[name] = { total: 0, completed: 0, overdue: 0, active: 0 };
-    const status = getStatus(t);
-    tanks[name].total += 1;
-    if (status === 'completed') tanks[name].completed += 1;
-    else tanks[name].active += 1;
-    if (status === 'overdue') tanks[name].overdue += 1;
-  });
-
-  const list = $('aquariumList');
-  list.innerHTML = '';
-  const names = Object.keys(tanks).sort((a, b) => a.localeCompare(b));
-  if (names.length === 0) {
-    list.appendChild(el('li', { text: 'Add a task to see your aquariums here.' }));
-    return;
-  }
-
-  names.forEach((name) => {
-    const t = tanks[name];
-    const percent = t.total === 0 ? 0 : Math.round((t.completed / t.total) * 100);
-    const fill = el('div', { className: 'tank-fill' });
-    fill.style.width = percent + '%';
-    const stats = el('p', { className: 'tank-stats' }, [
-      el('span', { text: t.active + ' active, ' + t.completed + ' done' }),
-    ]);
-    if (t.overdue > 0) {
-      stats.appendChild(document.createTextNode(', '));
-      stats.appendChild(el('span', { className: 'overdue', text: t.overdue + ' overdue' }));
-    }
-    list.appendChild(
-      el('li', {}, [
-        el('div', { className: 'tank-head' }, [
-          el('span', { className: 'tank-name', text: name }),
-          el('span', { text: percent + '% done' }),
-        ]),
-        el('div', { className: 'tank-bar', attrs: { 'aria-hidden': 'true' } }, [fill]),
-        stats,
-      ])
-    );
-  });
+function cancelNewAquarium() {
+  $('newAquarium').value = '';
+  renderAquariumOptions(state.lastAquarium);
+  if ($('aquarium').value === NEW_AQUARIUM) closeForm(); // nothing to fall back to
 }
 
-function buildTaskItem(task) {
-  const status = getStatus(task);
-
-  const children = [
-    el('div', { className: 'task-head' }, [
-      el('h3', { className: 'task-title', text: task.title }),
-      el('span', { className: 'badge badge-' + status, text: STATUS_LABELS[status] }),
-    ]),
-    el('p', { className: 'task-meta' }, [
-      el('span', { text: 'Aquarium: ' + task.aquarium }),
-      el('span', { text: 'Type: ' + task.type }),
-      el('span', { text: 'Frequency: ' + task.frequency }),
-    ]),
-    el('p', { className: 'task-due', text: dueText(task) }),
-  ];
-
-  if (task.notes) {
-    children.push(el('p', { className: 'task-notes', text: 'Notes: ' + task.notes }));
-  }
-
-  children.push(
-    el('div', { className: 'task-actions' }, [
-      el('button', {
-        type: 'button',
-        className: 'btn btn-small',
-        text: task.completed ? 'Mark not done' : 'Mark done',
-        onClick: () => toggleComplete(task),
-      }),
-      el('button', {
-        type: 'button',
-        className: 'btn btn-small',
-        text: 'Edit',
-        attrs: { 'aria-label': 'Edit ' + task.title },
-        onClick: () => startEdit(task._id),
-      }),
-      el('button', {
-        type: 'button',
-        className: 'btn btn-small btn-danger',
-        text: 'Delete',
-        attrs: { 'aria-label': 'Delete ' + task.title },
-        onClick: () => removeTask(task),
-      }),
-    ])
-  );
-
-  return el('li', { className: 'task status-' + status }, children);
-}
-
-function renderTasks() {
-  const list = $('taskList');
-  const empty = $('emptyState');
-  list.innerHTML = '';
-
-  // Active tasks first (earliest due date first), completed tasks last.
-  const visible = state.tasks
-    .filter((t) => state.filter === 'all' || getStatus(t) === state.filter)
-    .sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
-      return dateOnly(a.dueDate).localeCompare(dateOnly(b.dueDate));
-    });
-
-  if (visible.length === 0) {
-    empty.textContent =
-      state.tasks.length === 0
-        ? 'No tasks yet. Add your first aquarium-care task using the form.'
-        : 'No tasks match this filter.';
-    empty.hidden = false;
-  } else {
-    empty.hidden = true;
-  }
-
-  visible.forEach((t) => list.appendChild(buildTaskItem(t)));
-}
-
-function render() {
-  renderDashboard();
-  renderAquariumOptions();
-  renderAquariums();
-  renderTasks();
-}
-
-// ---------- Form (create + edit) ----------
-
-function resetForm() {
-  state.editingId = null;
-  const keepAquarium = $('aquarium').value; // keep the same tank selected between tasks
-  $('taskForm').reset();
-  renderAquariumOptions(keepAquarium);
-  $('dueDate').value = todayString();
-  $('formHeading').textContent = 'Add a task';
-  $('submitBtn').textContent = 'Add task';
-  $('cancelEditBtn').hidden = true;
-  closeNewAquarium();
-  showFormErrors([]);
-}
-
-function readForm() {
-  return {
+async function handleSubmit(event) {
+  event.preventDefault();
+  const data = {
     title: $('title').value.trim(),
-    aquarium: $('aquarium').value.trim(),
+    aquarium: $('aquarium').value === NEW_AQUARIUM ? '' : $('aquarium').value,
     type: $('type').value,
     frequency: $('frequency').value,
     dueDate: $('dueDate').value,
     notes: $('notes').value.trim(),
   };
-}
-
-function checkForm(data) {
   const problems = [];
-  if (!data.title) problems.push('Title is required');
-  if (!data.aquarium) problems.push('Choose an aquarium (use + to add one)');
-  if (!data.dueDate) problems.push('Due date is required');
-  return problems;
-}
-
-async function handleSubmit(event) {
-  event.preventDefault();
-  const data = readForm();
-
-  const problems = checkForm(data);
-  if (problems.length > 0) {
-    showFormErrors(problems);
-    return;
-  }
-  showFormErrors([]);
+  if (!data.title) problems.push('Give the task a title');
+  if (!data.aquarium) problems.push('Choose an aquarium, or save the new one first');
+  if (!data.dueDate) problems.push('Pick a due date');
+  if (problems.length) { showFormErrors(problems); return; }
 
   const editing = state.editingId;
   try {
-    if (editing) {
-      await api(API_URL + '/' + editing, { method: 'PUT', body: JSON.stringify(data) });
-    } else {
-      await api(API_URL, { method: 'POST', body: JSON.stringify(data) });
-    }
-    resetForm();
+    if (editing) await api(API + '/' + editing, { method: 'PUT', body: JSON.stringify(data) });
+    else await api(API, { method: 'POST', body: JSON.stringify(data) });
+    state.lastAquarium = data.aquarium;
+    closeForm();
     await loadTasks();
-    showMessage(editing ? 'Task updated.' : 'Task added.', 'success');
+    showMessage(editing ? 'Task updated.' : 'Task added.');
   } catch (err) {
     showFormErrors(err.details.length ? err.details : [err.message]);
   }
 }
 
 async function startEdit(id) {
-  try {
-    const task = await api(API_URL + '/' + id); // GET /api/tasks/:id
-    state.editingId = task._id;
-    $('title').value = task.title;
-    renderAquariumOptions(task.aquarium);
-    $('type').value = task.type;
-    $('frequency').value = task.frequency;
-    $('dueDate').value = dateOnly(task.dueDate);
-    $('notes').value = task.notes || '';
-    $('formHeading').textContent = 'Edit task';
-    $('submitBtn').textContent = 'Save changes';
-    $('cancelEditBtn').hidden = false;
-    showFormErrors([]);
-    $('formHeading').scrollIntoView({ block: 'start' });
-    $('title').focus();
-  } catch (err) {
-    showMessage('Could not open the task for editing: ' + err.message, 'error');
-  }
+  try { openForm(await api(API + '/' + id)); }
+  catch (err) { showMessage('Could not open that task: ' + err.message, 'error'); }
 }
 
 // ---------- Actions ----------
-
-async function toggleComplete(task) {
+async function toggleComplete(t) {
   try {
-    const result = await api(API_URL + '/' + task._id, {
-      method: 'PUT',
-      body: JSON.stringify({ completed: !task.completed, today: todayString() }),
-    });
+    const result = await api(API + '/' + t._id, { method: 'PUT', body: JSON.stringify({ completed: !t.completed, today: todayString() }) });
     await loadTasks();
-    if (task.completed) {
-      showMessage('Task marked as not done.', 'success');
-    } else if (result && result.nextTask) {
-      showMessage('Task done. Next one scheduled for ' + formatDate(dateOnly(result.nextTask.dueDate)) + '.', 'success');
-    } else {
-      showMessage('Task marked as done.', 'success');
-    }
-  } catch (err) {
-    showMessage('Could not update the task: ' + err.message, 'error');
-  }
+    if (t.completed) showMessage('Marked as not done.');
+    else if (result && result.nextTask) showMessage('Done. Next one is due ' + formatDate(dateOnly(result.nextTask.dueDate)) + '.');
+    else showMessage('Marked as done.');
+  } catch (err) { showMessage('Could not update the task: ' + err.message, 'error'); }
 }
-
-async function removeTask(task) {
-  const ok = window.confirm('Delete "' + task.title + '"? This cannot be undone.');
-  if (!ok) return;
+async function removeTask(t) {
   try {
-    await api(API_URL + '/' + task._id, { method: 'DELETE' });
-    if (state.editingId === task._id) resetForm();
+    await api(API + '/' + t._id, { method: 'DELETE' });
+    state.deleting = null;
     await loadTasks();
-    showMessage('Task deleted.', 'success');
-  } catch (err) {
-    showMessage('Could not delete the task: ' + err.message, 'error');
-  }
+    showMessage('Task deleted.');
+  } catch (err) { showMessage('Could not delete the task: ' + err.message, 'error'); }
 }
 
 // ---------- Start ----------
-
-document.querySelectorAll('.filter').forEach((button) => {
-  button.addEventListener('click', () => {
-    state.filter = button.dataset.filter;
-    document.querySelectorAll('.filter').forEach((b) => b.classList.toggle('is-active', b === button));
-    renderTasks();
-  });
-});
-
+document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => { state.filter = b.dataset.filter; state.deleting = null; render(); }));
+$('search').addEventListener('input', (e) => { state.search = e.target.value; renderList(); });
+$('filterAquarium').addEventListener('change', (e) => { state.aquarium = e.target.value; render(); });
+$('newTaskBtn').addEventListener('click', () => openForm());
+$('cancelBtn').addEventListener('click', closeForm);
 $('taskForm').addEventListener('submit', handleSubmit);
-$('cancelEditBtn').addEventListener('click', resetForm);
-$('addAquariumBtn').addEventListener('click', openNewAquarium);
+$('aquarium').addEventListener('change', syncNewAquariumRow);
+$('frequency').addEventListener('change', syncRepeatHint);
 $('saveAquariumBtn').addEventListener('click', saveNewAquarium);
-$('cancelAquariumBtn').addEventListener('click', closeNewAquarium);
-$('newAquarium').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    saveNewAquarium();
-  }
-});
+$('cancelAquariumBtn').addEventListener('click', cancelNewAquarium);
+$('newAquarium').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveNewAquarium(); } });
+$('taskDialog').addEventListener('click', (e) => { if (e.target === $('taskDialog')) closeForm(); });
 
-resetForm();
+$('todayDate').textContent = new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' });
 loadAquariums();
 loadTasks();

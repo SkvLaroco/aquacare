@@ -3,133 +3,109 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AquaCare - Aquarium care tracker</title>
+  <title>AquaCare</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="masthead">
-    <div class="wrap">
+  <header class="bar">
+    <div class="wrap bar-inner">
       <h1>AquaCare</h1>
-      <p>Keep every tank on schedule.</p>
+      <span id="todayDate" class="today"></span>
+      <button type="button" class="btn btn-light" id="newTaskBtn">New task</button>
     </div>
-    <svg class="wave" viewBox="0 0 1200 40" preserveAspectRatio="none" aria-hidden="true">
-      <path d="M0 20 C150 40 300 0 450 20 S750 40 900 20 S1100 0 1200 20 V40 H0 Z"></path>
-    </svg>
   </header>
 
   <main class="wrap">
-    <div id="message" role="status" aria-live="polite" hidden></div>
+    <h2 class="sr-only">Overview</h2>
+    <nav class="strip" id="strip" aria-label="Show tasks by status">
+      <button type="button" class="tab" data-filter="active"><span class="num" id="nActive">0</span><span class="lbl">Active</span></button>
+      <button type="button" class="tab" data-filter="overdue"><span class="num" id="nOverdue">0</span><span class="lbl">Overdue</span></button>
+      <button type="button" class="tab" data-filter="today"><span class="num" id="nToday">0</span><span class="lbl">Due today</span></button>
+      <button type="button" class="tab" data-filter="upcoming"><span class="num" id="nUpcoming">0</span><span class="lbl">Upcoming</span></button>
+      <button type="button" class="tab" data-filter="completed"><span class="num" id="nCompleted">0</span><span class="lbl">Completed</span></button>
+    </nav>
 
-    <section class="dashboard" aria-labelledby="dashboardHeading">
-      <h2 id="dashboardHeading">Dashboard</h2>
-      <div class="stats">
-        <div class="stat stat-active">
-          <span class="stat-num" id="statActive">0</span>
-          <span class="stat-label">Active tasks</span>
+    <div class="layout">
+      <section class="list-col" aria-label="Tasks">
+        <div class="tools">
+          <input type="search" id="search" placeholder="Search tasks" aria-label="Search tasks">
+          <select id="filterAquarium" aria-label="Filter by aquarium"></select>
         </div>
-        <div class="stat stat-today">
-          <span class="stat-num" id="statToday">0</span>
-          <span class="stat-label">Due today</span>
-        </div>
-        <div class="stat stat-upcoming">
-          <span class="stat-num" id="statUpcoming">0</span>
-          <span class="stat-label">Upcoming</span>
-        </div>
-        <div class="stat stat-overdue">
-          <span class="stat-num" id="statOverdue">0</span>
-          <span class="stat-label">Overdue</span>
-        </div>
-      </div>
-      <div class="aquariums">
-        <h3>By aquarium</h3>
-        <ul id="aquariumList" class="aquarium-list"></ul>
-      </div>
-      <div class="recent">
-        <h3>Recently completed</h3>
-        <ul id="recentList" class="recent-list"></ul>
-      </div>
-    </section>
-
-    <div class="columns">
-      <section class="panel form-panel" aria-labelledby="formHeading">
-        <h2 id="formHeading">Add a task</h2>
-        <form id="taskForm" novalidate>
-          <ul id="formErrors" class="form-errors" hidden></ul>
-
-          <label for="title">Task title</label>
-          <input type="text" id="title" maxlength="100" placeholder="e.g. Weekly water change" required>
-
-          <label for="aquarium">Aquarium</label>
-          <div class="select-row">
-            <select id="aquarium" required></select>
-            <button type="button" class="btn btn-icon" id="addAquariumBtn" aria-label="Add a new aquarium" title="Add a new aquarium">+</button>
-          </div>
-          <div id="newAquariumRow" class="new-aquarium" hidden>
-            <input type="text" id="newAquarium" maxlength="60" placeholder="New aquarium name, e.g. 5G Betta Tank" aria-label="New aquarium name">
-            <button type="button" class="btn btn-primary btn-small" id="saveAquariumBtn">Add</button>
-            <button type="button" class="btn btn-quiet btn-small" id="cancelAquariumBtn">Cancel</button>
-          </div>
-
-          <div class="row">
-            <div>
-              <label for="type">Task type</label>
-              <select id="type" required>
-                <option value="Feeding">Feeding</option>
-                <option value="Water Change">Water Change</option>
-                <option value="Water Testing">Water Testing</option>
-                <option value="Filter Cleaning">Filter Cleaning</option>
-                <option value="Plant Maintenance">Plant Maintenance</option>
-                <option value="Medication">Medication</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label for="frequency">Frequency</label>
-              <select id="frequency">
-                <option value="Once">Once</option>
-                <option value="Daily">Daily</option>
-                <option value="Weekly">Weekly</option>
-                <option value="Monthly">Monthly</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-          </div>
-
-          <label for="dueDate">Due date</label>
-          <input type="date" id="dueDate" required>
-
-          <label for="notes">Notes (optional)</label>
-          <textarea id="notes" rows="3" maxlength="500" placeholder="e.g. Replace about 20-30% of the water"></textarea>
-
-          <div class="form-actions">
-            <button type="submit" class="btn btn-primary" id="submitBtn">Add task</button>
-            <button type="button" class="btn btn-quiet" id="cancelEditBtn" hidden>Cancel edit</button>
-          </div>
-        </form>
+        <div id="taskArea"></div>
       </section>
 
-      <section class="panel tasks-panel" aria-labelledby="tasksHeading">
-        <h2 id="tasksHeading">Tasks</h2>
-        <div class="filters" role="group" aria-label="Filter tasks by status">
-          <button type="button" class="filter is-active" data-filter="all">All</button>
-          <button type="button" class="filter" data-filter="overdue">Overdue</button>
-          <button type="button" class="filter" data-filter="today">Due today</button>
-          <button type="button" class="filter" data-filter="upcoming">Upcoming</button>
-          <button type="button" class="filter" data-filter="completed">Completed</button>
-        </div>
-        <p id="emptyState" class="empty" hidden></p>
-        <ul id="taskList" class="task-list"></ul>
-      </section>
+      <aside class="side">
+        <section>
+          <h2>Aquariums</h2>
+          <ul id="aquariumList" class="plain"></ul>
+        </section>
+        <section>
+          <h2>Recently completed</h2>
+          <ul id="recentList" class="plain"></ul>
+        </section>
+      </aside>
     </div>
   </main>
 
-  <footer class="wrap site-footer">
-    AquaCare is a CITE 006A final project. Task status is worked out from each due date.
-  </footer>
+  <dialog id="taskDialog" aria-labelledby="dialogTitle">
+    <form id="taskForm" novalidate>
+      <h2 id="dialogTitle">New task</h2>
+      <ul id="formErrors" class="form-errors" hidden></ul>
 
+      <label for="title">What needs doing?</label>
+      <input type="text" id="title" maxlength="100" placeholder="Weekly water change" autocomplete="off">
+
+      <label for="aquarium">Aquarium</label>
+      <select id="aquarium"></select>
+      <div id="newAquariumRow" class="new-aquarium" hidden>
+        <input type="text" id="newAquarium" maxlength="60" placeholder="Name of the new aquarium" aria-label="Name of the new aquarium" autocomplete="off">
+        <button type="button" class="btn btn-primary" id="saveAquariumBtn">Save</button>
+        <button type="button" class="btn btn-text" id="cancelAquariumBtn">Cancel</button>
+      </div>
+
+      <div class="pair">
+        <div>
+          <label for="type">Type</label>
+          <select id="type">
+            <option>Feeding</option>
+            <option>Water Change</option>
+            <option>Water Testing</option>
+            <option>Filter Cleaning</option>
+            <option>Plant Maintenance</option>
+            <option>Medication</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div>
+          <label for="frequency">Repeats</label>
+          <select id="frequency">
+            <option>Once</option>
+            <option>Daily</option>
+            <option>Weekly</option>
+            <option>Monthly</option>
+            <option>Other</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint" id="repeatHint" hidden>When you finish this task, the next one is added automatically.</p>
+
+      <label for="dueDate">Due</label>
+      <input type="date" id="dueDate">
+
+      <label for="notes">Notes</label>
+      <textarea id="notes" rows="3" maxlength="500" placeholder="Optional"></textarea>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary" id="submitBtn">Add task</button>
+        <button type="button" class="btn btn-text" id="cancelBtn">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" role="status" aria-live="polite" hidden></div>
   <script src="script.js"></script>
 </body>
 </html>
