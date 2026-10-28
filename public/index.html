@@ -10,18 +10,21 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="bar">
-    <div class="wrap bar-inner">
-      <h1>AquaCare</h1>
-      <span id="todayDate" class="today"></span>
-      <button type="button" class="btn btn-light" id="newTaskBtn">New task</button>
+  <header class="top">
+    <div class="wrap">
+      <div class="bar">
+        <h1>AquaCare</h1>
+        <span id="todayDate" class="today"></span>
+        <button type="button" class="btn btn-light" id="newTaskBtn">New task</button>
+      </div>
+      <p id="lead" class="lead"></p>
     </div>
   </header>
 
   <main class="wrap">
     <h2 class="sr-only">Overview</h2>
     <nav class="strip" id="strip" aria-label="Show tasks by status">
-      <button type="button" class="tab" data-filter="active"><span class="num" id="nActive">0</span><span class="lbl">Active</span></button>
+      <button type="button" class="tab" data-filter="all"><span class="num" id="nAll">0</span><span class="lbl">All</span></button>
       <button type="button" class="tab" data-filter="overdue"><span class="num" id="nOverdue">0</span><span class="lbl">Overdue</span></button>
       <button type="button" class="tab" data-filter="today"><span class="num" id="nToday">0</span><span class="lbl">Due today</span></button>
       <button type="button" class="tab" data-filter="upcoming"><span class="num" id="nUpcoming">0</span><span class="lbl">Upcoming</span></button>
@@ -29,20 +32,21 @@
     </nav>
 
     <div class="layout">
-      <section class="list-col" aria-label="Tasks">
+      <section class="panel list-col" aria-label="Tasks">
         <div class="tools">
           <input type="search" id="search" placeholder="Search tasks" aria-label="Search tasks">
           <select id="filterAquarium" aria-label="Filter by aquarium"></select>
         </div>
+        <p id="listSummary" class="list-sub"></p>
         <div id="taskArea"></div>
       </section>
 
       <aside class="side">
-        <section>
+        <section class="panel">
           <h2>Aquariums</h2>
           <ul id="aquariumList" class="plain"></ul>
         </section>
-        <section>
+        <section class="panel">
           <h2>Recently completed</h2>
           <ul id="recentList" class="plain"></ul>
         </section>
@@ -55,8 +59,13 @@
       <h2 id="dialogTitle">New task</h2>
       <ul id="formErrors" class="form-errors" hidden></ul>
 
-      <label for="title">What needs doing?</label>
-      <input type="text" id="title" maxlength="100" placeholder="Weekly water change" autocomplete="off">
+      <fieldset class="types">
+        <legend>What kind of task?</legend>
+        <div class="type-grid" id="typeGrid"></div>
+      </fieldset>
+
+      <label for="title">Task</label>
+      <input type="text" id="title" maxlength="100" placeholder="e.g. Weekly water change" autocomplete="off">
 
       <label for="aquarium">Aquarium</label>
       <select id="aquarium"></select>
@@ -68,16 +77,8 @@
 
       <div class="pair">
         <div>
-          <label for="type">Type</label>
-          <select id="type">
-            <option>Feeding</option>
-            <option>Water Change</option>
-            <option>Water Testing</option>
-            <option>Filter Cleaning</option>
-            <option>Plant Maintenance</option>
-            <option>Medication</option>
-            <option>Other</option>
-          </select>
+          <label for="dueDate">Due</label>
+          <input type="date" id="dueDate">
         </div>
         <div>
           <label for="frequency">Repeats</label>
@@ -92,11 +93,8 @@
       </div>
       <p class="hint" id="repeatHint" hidden>When you finish this task, the next one is added automatically.</p>
 
-      <label for="dueDate">Due</label>
-      <input type="date" id="dueDate">
-
       <label for="notes">Notes</label>
-      <textarea id="notes" rows="3" maxlength="500" placeholder="Optional"></textarea>
+      <textarea id="notes" rows="2" maxlength="500" placeholder="Optional"></textarea>
 
       <div class="form-actions">
         <button type="submit" class="btn btn-primary" id="submitBtn">Add task</button>

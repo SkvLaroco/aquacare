@@ -3,7 +3,33 @@ const API = '/api/tasks';
 const AQ_API = '/api/aquariums';
 const NEW_AQUARIUM = '__new__';
 
-const state = { tasks: [], aquariums: [], filter: 'active', aquarium: 'all', search: '', editingId: null, deleting: null, lastAquarium: '' };
+// Task types: icon (static SVG paths), plus the repeat and title suggested for a new task.
+const ICONS = {
+  'Feeding': '<path d="M2 12c3.5-5 9-6 13-3l5-2-1.5 5 1.5 5-5-2c-4 3-9 2-13-3z"/><circle cx="8.5" cy="11" r="0.7" fill="currentColor"/>',
+  'Water Change': '<path d="M12 3c3.5 4.5 6 7.5 6 10.5a6 6 0 0 1-12 0C6 10.5 8.5 7.5 12 3z"/>',
+  'Water Testing': '<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M7.5 15h9"/>',
+  'Filter Cleaning': '<path d="M7 4h10v3H7zM6 7h12v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1zM10 11v6M14 11v6"/>',
+  'Plant Maintenance': '<path d="M5 19c0-8 5-14 14-14 0 9-6 14-14 14zM5 19c3-4 6-6 10-8"/>',
+  'Medication': '<path d="M10.5 20.5l10-10a4.95 4.95 0 0 0-7-7l-10 10a4.95 4.95 0 0 0 7 7zM8.5 8.5l7 7"/>',
+  'Other': '<path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/>',
+};
+const TYPES = [
+  { name: 'Feeding', freq: 'Daily', title: 'Feed the fish' },
+  { name: 'Water Change', freq: 'Weekly', title: 'Water change' },
+  { name: 'Water Testing', freq: 'Weekly', title: 'Test the water' },
+  { name: 'Filter Cleaning', freq: 'Monthly', title: 'Clean the filter' },
+  { name: 'Plant Maintenance', freq: 'Weekly', title: 'Trim the plants' },
+  { name: 'Medication', freq: 'Daily', title: 'Give medication' },
+  { name: 'Other', freq: 'Once', title: '' },
+];
+const svg = (type) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[type] || ICONS.Other) + '</svg>';
+function icon(type) {
+  const span = el('span', { className: 'ticon' });
+  span.innerHTML = svg(type); // static markup from ICONS, never user text
+  return span;
+}
+
+const state = { tasks: [], aquariums: [], filter: 'all', aquarium: 'all', search: '', editingId: null, deleting: null, lastAquarium: '', suggested: '' };
 const $ = (id) => document.getElementById(id);
 
 function el(tag, o = {}, kids = []) {
@@ -102,7 +128,7 @@ function visibleTasks() {
   const q = state.search.trim().toLowerCase();
   return state.tasks.filter((t) => {
     const s = getStatus(t);
-    if (state.filter === 'active' ? s === 'completed' : s !== state.filter) return false;
+    if (state.filter !== 'all' && s !== state.filter) return false;
     if (state.aquarium !== 'all' && canon(t.aquarium) !== state.aquarium) return false;
     return !q || (t.title + ' ' + t.aquarium + ' ' + t.type + ' ' + (t.notes || '')).toLowerCase().includes(q);
   });
@@ -111,7 +137,7 @@ function visibleTasks() {
 function renderStrip() {
   const c = { overdue: 0, today: 0, upcoming: 0, completed: 0 };
   state.tasks.forEach((t) => { c[getStatus(t)] += 1; });
-  $('nActive').textContent = c.overdue + c.today + c.upcoming;
+  $('nAll').textContent = state.tasks.length;
   $('nOverdue').textContent = c.overdue;
   $('nToday').textContent = c.today;
   $('nUpcoming').textContent = c.upcoming;
@@ -153,6 +179,7 @@ function buildRow(t) {
 
   return el('li', { className: 'task ' + s + (t.completed ? ' done' : '') }, [
     el('button', { type: 'button', className: 'check', attrs: { 'aria-label': (t.completed ? 'Mark not done: ' : 'Mark done: ') + t.title }, onClick: () => toggleComplete(t) }),
+    icon(t.type),
     el('div', {}, main),
     el('div', { className: 'when' }, [
       el('span', { className: 'date', text: formatDate(dateOnly(t.dueDate)) }),
@@ -165,32 +192,30 @@ function buildRow(t) {
 function renderList() {
   const area = $('taskArea');
   area.innerHTML = '';
-  let tasks = visibleTasks();
+  const total = state.tasks.length, active = state.tasks.filter((t) => !t.completed).length;
+  $('listSummary').textContent = total ? active + ' active, ' + (total - active) + ' completed' : '';
+  const tasks = visibleTasks();
 
   if (tasks.length === 0) {
-    const none = state.tasks.length === 0;
+    const art = el('div');
+    art.innerHTML = svg('Feeding');
     const box = el('div', { className: 'empty' }, [
-      el('p', { text: none ? 'No tasks yet. Start with the next thing your tank needs.' : 'Nothing matches these filters.' }),
+      art,
+      el('p', { text: total === 0 ? 'No tasks yet. Start with the next thing your tank needs.' : 'Nothing matches these filters.' }),
     ]);
-    if (none) box.appendChild(el('button', { type: 'button', className: 'btn btn-primary', text: 'Add the first task', onClick: () => openForm() }));
+    if (total === 0) box.appendChild(el('button', { type: 'button', className: 'btn btn-primary', text: 'Add the first task', onClick: () => openForm() }));
     area.appendChild(box);
     return;
   }
 
   const byDue = (a, b) => dateOnly(a.dueDate).localeCompare(dateOnly(b.dueDate));
-  if (state.filter === 'completed') {
-    tasks = tasks.sort((a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt));
-    const ul = el('ul', { className: 'plain' });
-    tasks.forEach((t) => ul.appendChild(buildRow(t)));
-    area.appendChild(ul);
-    return;
-  }
-  const groups = state.filter === 'active' ? ['overdue', 'today', 'upcoming'] : [state.filter];
-  const heads = { overdue: 'Overdue', today: 'Due today', upcoming: 'Upcoming' };
+  const byDone = (a, b) => new Date(b.completedAt || b.updatedAt) - new Date(a.completedAt || a.updatedAt);
+  const groups = state.filter === 'all' ? ['overdue', 'today', 'upcoming', 'completed'] : [state.filter];
+  const heads = { overdue: 'Overdue', today: 'Due today', upcoming: 'Upcoming', completed: 'Completed' };
   groups.forEach((g) => {
-    const items = tasks.filter((t) => getStatus(t) === g).sort(byDue);
+    const items = tasks.filter((t) => getStatus(t) === g).sort(g === 'completed' ? byDone : byDue);
     if (items.length === 0) return;
-    if (state.filter === 'active') {
+    if (state.filter === 'all') {
       area.appendChild(el('h3', { className: 'group-head ' + g }, [document.createTextNode(heads[g]), el('span', { className: 'count', text: String(items.length) })]));
     }
     const ul = el('ul', { className: 'plain' });
@@ -214,14 +239,15 @@ function renderSide() {
   if (names.length === 0) list.appendChild(el('li', { className: 'side-empty', text: 'None yet. Add one from the New task form.' }));
   names.forEach((n) => {
     const x = tanks[n], pct = x.total ? Math.round((x.done / x.total) * 100) : 0;
-    const fill = el('div', { className: 'tank-fill' });
-    fill.style.width = pct + '%';
+    const water = el('div', { className: 'water' });
+    water.style.height = pct + '%';
+    const glass = el('div', { className: 'glass', attrs: { 'aria-hidden': 'true' } }, [water]);
     const note = el('div', { className: 'tank-note' }, [document.createTextNode(x.total ? x.active + ' active, ' + x.done + ' done' : 'No tasks yet')]);
     if (x.late) { note.appendChild(document.createTextNode(', ')); note.appendChild(el('span', { className: 'late', text: x.late + ' overdue' })); }
     list.appendChild(el('li', {}, [
       el('button', { type: 'button', className: 'tank' + (state.aquarium === n ? ' is-active' : ''), attrs: { 'aria-pressed': String(state.aquarium === n) }, onClick: () => { state.aquarium = state.aquarium === n ? 'all' : n; render(); } }, [
+        glass,
         el('div', { className: 'tank-line' }, [el('span', { className: 'tank-name', text: n }), el('span', { className: 'tank-pct', text: pct + '%' })]),
-        el('div', { className: 'tank-bar', attrs: { 'aria-hidden': 'true' } }, [fill]),
         note,
       ]),
     ]));
@@ -239,7 +265,34 @@ function renderSide() {
   ])));
 }
 
+function renderLead() {
+  const lead = $('lead');
+  lead.innerHTML = '';
+  const h = new Date().getHours();
+  const hello = h < 12 ? 'Good morning. ' : h < 18 ? 'Good afternoon. ' : 'Good evening. ';
+  const c = { overdue: 0, today: 0 };
+  state.tasks.forEach((t) => { const s = getStatus(t); if (c[s] !== undefined) c[s] += 1; });
+  const verb = (n, w) => n + (n === 1 ? ' task is ' : ' tasks are ') + w;
+  lead.appendChild(document.createTextNode(hello));
+  if (state.tasks.length === 0) {
+    lead.appendChild(document.createTextNode('Add your first task to start a care schedule.'));
+  } else if (c.overdue + c.today === 0) {
+    lead.appendChild(el('span', { className: 'ok', text: 'You are all caught up.' }));
+    const next = state.tasks.filter((t) => !t.completed).sort((a, b) => dateOnly(a.dueDate).localeCompare(dateOnly(b.dueDate)))[0];
+    if (next) lead.appendChild(document.createTextNode(' Next up: ' + next.title + ', ' + relative(next) + '.'));
+  } else if (c.overdue && c.today) {
+    lead.appendChild(el('strong', { text: verb(c.overdue, 'overdue') }));
+    lead.appendChild(document.createTextNode(' and ' + c.today + ' due today.'));
+  } else if (c.overdue) {
+    lead.appendChild(el('strong', { text: verb(c.overdue, 'overdue') }));
+    lead.appendChild(document.createTextNode('.'));
+  } else {
+    lead.appendChild(document.createTextNode(verb(c.today, 'due today') + '.'));
+  }
+}
+
 function render() {
+  renderLead();
   renderStrip();
   renderTools();
   renderList();
@@ -266,6 +319,32 @@ function syncRepeatHint() {
   $('repeatHint').hidden = !['Daily', 'Weekly', 'Monthly'].includes($('frequency').value);
 }
 
+function buildTypeChips() {
+  TYPES.forEach((t) => {
+    const face = el('span', { className: 'face' });
+    face.innerHTML = svg(t.name);
+    face.appendChild(el('span', { text: t.name }));
+    $('typeGrid').appendChild(el('label', { className: 'chip' }, [
+      el('input', { type: 'radio', attrs: { name: 'type', value: t.name } }),
+      face,
+    ]));
+  });
+}
+const getType = () => { const r = document.querySelector('input[name="type"]:checked'); return r ? r.value : ''; };
+function setType(name) { document.querySelectorAll('input[name="type"]').forEach((r) => { r.checked = r.value === name; }); }
+
+// For a new task, choosing a type suggests a title and how often it repeats.
+function onTypeChange() {
+  syncRepeatHint();
+  if (state.editingId) return;
+  const t = TYPES.find((x) => x.name === getType());
+  if (!t) return;
+  $('frequency').value = t.freq;
+  syncRepeatHint();
+  const title = $('title').value.trim();
+  if (!title || title === state.suggested) { $('title').value = t.title; state.suggested = t.title; }
+}
+
 function openForm(task) {
   state.editingId = task ? task._id : null;
   $('taskForm').reset();
@@ -274,7 +353,8 @@ function openForm(task) {
   $('dialogTitle').textContent = task ? 'Edit task' : 'New task';
   $('submitBtn').textContent = task ? 'Save changes' : 'Add task';
   $('title').value = task ? task.title : '';
-  $('type').value = task ? task.type : 'Feeding';
+  setType(task ? task.type : '');
+  state.suggested = '';
   $('frequency').value = task ? task.frequency : 'Once';
   $('dueDate').value = task ? dateOnly(task.dueDate) : todayString();
   $('notes').value = task ? task.notes || '' : '';
@@ -321,12 +401,13 @@ async function handleSubmit(event) {
   const data = {
     title: $('title').value.trim(),
     aquarium: $('aquarium').value === NEW_AQUARIUM ? '' : $('aquarium').value,
-    type: $('type').value,
+    type: getType(),
     frequency: $('frequency').value,
     dueDate: $('dueDate').value,
     notes: $('notes').value.trim(),
   };
   const problems = [];
+  if (!data.type) problems.push('Pick a type of task');
   if (!data.title) problems.push('Give the task a title');
   if (!data.aquarium) problems.push('Choose an aquarium, or save the new one first');
   if (!data.dueDate) problems.push('Pick a due date');
@@ -378,11 +459,13 @@ $('cancelBtn').addEventListener('click', closeForm);
 $('taskForm').addEventListener('submit', handleSubmit);
 $('aquarium').addEventListener('change', syncNewAquariumRow);
 $('frequency').addEventListener('change', syncRepeatHint);
+$('typeGrid').addEventListener('change', onTypeChange);
 $('saveAquariumBtn').addEventListener('click', saveNewAquarium);
 $('cancelAquariumBtn').addEventListener('click', cancelNewAquarium);
 $('newAquarium').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveNewAquarium(); } });
 $('taskDialog').addEventListener('click', (e) => { if (e.target === $('taskDialog')) closeForm(); });
 
 $('todayDate').textContent = new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' });
+buildTypeChips();
 loadAquariums();
 loadTasks();
